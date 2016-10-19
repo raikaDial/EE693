@@ -66,7 +66,7 @@ void setup() {
     Serial.println("Opened Files!");
  
     size_t numsamples_total = 650000;
-    size_t numsamples_window = 3600;
+    size_t numsamples_window = 1800;
     float* ecg_data = new float[numsamples_window];
     
 
