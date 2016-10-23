@@ -42,7 +42,6 @@ class ECG_Filter {
             }
             return max_val;
         }
-
         template <class type>
         type mean(type* arr, const size_t length) {
             type avg  = 0;

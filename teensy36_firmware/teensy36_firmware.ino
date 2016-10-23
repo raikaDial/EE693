@@ -66,10 +66,9 @@ void setup() {
     Serial.println("Opened Files!");
  
     size_t numsamples_total = 650000;
-    size_t numsamples_window = 1800;
+    size_t numsamples_window = 3600;
     float* ecg_data = new float[numsamples_window];
     
-
     // Read in all the ECG data and filter it
     char *val2_ptr;
     for(size_t i=0; i<numsamples_total; i+=numsamples_window) {
@@ -92,9 +91,11 @@ void setup() {
             ecg_data[j] = val2;
         }
 
+        digitalWrite(23, HIGH);
         uint32_t start = micros();
         uint16_t numpeaks = ecg_filter.pan85_countpeaks(ecg_data, numsamples_window);
         uint32_t end = micros();
+        digitalWrite(23, LOW);
         sprintf(buff, "%lu,%u\n", end-start, numpeaks);
         char2tchar(buff, 128, wbuff);
         bw = f_puts(wbuff, &fil_timing_peaks);
