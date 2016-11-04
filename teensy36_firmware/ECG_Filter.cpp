@@ -125,16 +125,16 @@ void ECG_Filter::pan85_dev(float* signal, float* output, size_t length) {
 
 // ***** Optimized for fixed precision or integer data ***** //
 
-uint16_t ECG_Filter::pan85_countpeaks(int32_t* signal, size_t length) {
+uint16_t ECG_Filter::pan85_countpeaks(uint16_t* signal, size_t length) {
   uint16_t numpeaks = 0;
   pan85_filter(signal, length);
   
   return numpeaks;
 }
 
-void ECG_Filter::pan85_filter(int32_t* signal, size_t length) {
+void ECG_Filter::pan85_filter(uint16_t* signal, size_t length) {
     if(length > 128) {
-        int32_t* buff = new int32_t[length];
+        uint16_t* buff = new uint16_t[length];
         pan85_lp(signal,buff,length);
         pan85_hp(buff,signal,length);
         pan85_dev(signal,buff,length);
@@ -149,9 +149,9 @@ void ECG_Filter::pan85_filter(int32_t* signal, size_t length) {
     }
 }
 
-void ECG_Filter::pan85_lp(int32_t* signal, int32_t* output, size_t length) {
-    static int32_t past_inputs[12] = {};
-    static int32_t past_outputs[2] = {};
+void ECG_Filter::pan85_lp(uint16_t* signal, uint16_t* output, size_t length) {
+    static uint16_t past_inputs[12] = {};
+    static uint16_t past_outputs[2] = {};
 
     // Initial Conditions
     output[0] = (past_outputs[1] << 1)- past_outputs[0] + signal[0] - (past_inputs[6] << 1) + past_inputs[0];
@@ -169,9 +169,9 @@ void ECG_Filter::pan85_lp(int32_t* signal, int32_t* output, size_t length) {
     past_outputs[1] = output[(length-1)];
 }
 
-void ECG_Filter::pan85_hp(int32_t* signal, int32_t* output, size_t length) {
-    static int32_t past_inputs[32] = {};
-    static int32_t past_output = 0;
+void ECG_Filter::pan85_hp(uint16_t* signal, uint16_t* output, size_t length) {
+    static uint16_t past_inputs[32] = {};
+    static uint16_t past_output = 0;
     // Initial Condition
     output[0] = past_output - (signal[0] >> 5) + past_inputs[16] - past_inputs[15] + (past_inputs[0] >> 5);
     
@@ -188,8 +188,8 @@ void ECG_Filter::pan85_hp(int32_t* signal, int32_t* output, size_t length) {
     past_output = output[(length - 1)];
 }
 
-void ECG_Filter::pan85_dev(int32_t* signal, int32_t* output, size_t length) {
-    static int32_t past_inputs[4] = {};
+void ECG_Filter::pan85_dev(uint16_t* signal, uint16_t* output, size_t length) {
+    static uint16_t past_inputs[4] = {};
     // Initial Conditions
     output[0] = ( (signal[0] << 1) + past_inputs[3] - past_inputs[1] - (past_inputs[0] << 1) ) >> 3;
     output[1] = ( (signal[1] << 1) + signal[0] - past_inputs[2] - (past_inputs[1] << 1) ) >> 3;

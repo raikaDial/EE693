@@ -8,17 +8,17 @@ class ECG_Filter {
         uint16_t pan85_countpeaks(float* signal, size_t length);
         void pan85_filter(float* signal, size_t length);
         
-        void pan85_filter(int32_t* signal, size_t length);
-        uint16_t pan85_countpeaks(int32_t* signal, size_t length);
+        void pan85_filter(uint16_t* signal, size_t length);
+        uint16_t pan85_countpeaks(uint16_t* signal, size_t length);
     private:
         bool transient_included = true;
         void pan85_lp(float* signal, float* output, size_t length);
         void pan85_hp(float* signal, float* output, size_t length);
         void pan85_dev(float* signal, float* output, size_t length);
 
-        void pan85_lp(int32_t* signal, int32_t* output, size_t length);
-        void pan85_hp(int32_t* signal, int32_t* output, size_t length);
-        void pan85_dev(int32_t* signal, int32_t* output, size_t length);
+        void pan85_lp(uint16_t* signal, uint16_t* output, size_t length);
+        void pan85_hp(uint16_t* signal, uint16_t* output, size_t length);
+        void pan85_dev(uint16_t* signal, uint16_t* output, size_t length);
         
         template <class type> 
         void square_signal(type* signal, type* output, size_t length) {
