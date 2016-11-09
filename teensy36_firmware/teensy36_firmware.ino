@@ -68,20 +68,32 @@ iir_filter emgLP( (const float32_t[]){0.1453, 0.2906, 0.1453, 0.6710, -0.2533}, 
 
 // ***** Sensor Sampling Stuff ***** //
 ADC *adc = new ADC(); // adc object
-const float scale_timer = 11.1;//12.1;//11.7;
-const uint32_t ECG_TS = (uint32_t)(1000000/360.0/scale_timer); // Sampling Period in Microseconds
 
-#define ADXL345_BUFFSIZE 3*1024
-#define ECG_BUFFSIZE 1024
-uint16_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
-int16_t adxl345_buff[ADXL345_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+const float scale_timer = 15.98;
+const uint32_t ECG_TS = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
+const uint32_t SPO2_SCALE = 25; // Sample at 10 Hz, so 1/25 everything else
+uint16_t spo2_counter = 0;
+
+// Buffers for sensors and their respective control variables
+#define ADXL345_BUFFSIZE 3*2*1000
+#define ECG_BUFFSIZE 2*1000
+#define EMG_BUFFSIZE 2*1000
+#define SPO2_BUFFSIZE 40
+uint8_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+uint8_t emg_buff[EMG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+uint8_t spo2_buff[SPO2_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+uint8_t adxl345_buff[ADXL345_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 uint16_t ecg_buff_idx = 0;
 uint16_t adxl345_buff_idx = 0;
+uint16_t spo2_buff_idx = 0;
+uint16_t emg_buff_idx = 0;
 
-float32_t emg_fs = 250;
 const int ECG_PIN = A1;
+const int EMG_PIN = A2;
 volatile bool ecg_flag = 0;
 volatile bool adxl345_flag = 0;
+volatile bool emg_flag = 0;
+volatile bool spo2_flag = 0;
 // ********** //
 
 // ***** MicroSD Card Stuff ***** //
@@ -92,7 +104,7 @@ DIR dir;        /* Directory object */
 FILINFO fno;      /* File information object */
 UINT wr;
 
-#define BUFFSIZE 2*ECG_BUFFSIZE+2*ADXL345_BUFFSIZE // size of uSD Buffer. Should be a power of 2.
+#define BUFFSIZE ECG_BUFFSIZE+EMG_BUFFSIZE+SPO2_BUFFSIZE+ADXL345_BUFFSIZE//2*ECG_BUFFSIZE+2*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE // size of uSD Buffer.
 uint8_t buffer[BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 
 // ********** //
@@ -116,6 +128,7 @@ void setup() {
     // Wait for serial to open. No need for Serial.begin() because Teensy has native USB
     //while (!Serial);
     pinMode(23, OUTPUT);
+    pinMode(22, OUTPUT);
     f_mount(&fatfs, (TCHAR*)_T("/"), 0); /* Mount/Unmount a logical drive */
 
     // Setup ADC
@@ -134,6 +147,8 @@ void setup() {
     rc = f_open(&fil, (TCHAR*)_T("test.bin"), FA_WRITE | FA_CREATE_ALWAYS);
     rc = f_close(&fil);
 
+//    Timer1.initialize(SPO2_TS);
+//    Timer1.attachInterrupt(SPO2_ISR);
     Timer3.initialize(ECG_TS);
     Timer3.attachInterrupt(ECG_ISR);
 }
@@ -142,15 +157,39 @@ void loop() {
     while(true) {
         sleep();
         noInterrupts();
-        digitalWriteFast(23, HIGH);
+        //digitalWriteFast(23, HIGH);
         if(ecg_flag) {
-            ecg_buff[ecg_buff_idx++] = adc->adc0->analogRead(ECG_PIN);
+            //digitalWriteFast(22, HIGH);
+            uint16_t val = adc->adc0->analogRead(ECG_PIN);
+            ecg_buff[ecg_buff_idx] = (uint8_t) val;
+            ecg_buff[ecg_buff_idx+1] = (uint8_t) (val >> 8);
+            ecg_buff_idx+=2;
+            //ecg_buff[ecg_buff_idx++] = adc->adc0->analogRead(ECG_PIN);
             ecg_flag = false;
+           //digitalWriteFast(22, LOW);
         }
         if(adxl345_flag) {
-            adxl.readAccel( &(adxl345_buff[adxl345_buff_idx]) );
-            adxl345_buff_idx += 3;
+            int16_t x, y, z;
+            adxl.readAccel(&x, &y, &z);
+            adxl345_buff[adxl345_buff_idx+0] = (uint8_t) x;
+            adxl345_buff[adxl345_buff_idx+1] = (uint8_t) (x >> 8);
+            adxl345_buff[adxl345_buff_idx+2] = (uint8_t) y;
+            adxl345_buff[adxl345_buff_idx+3] = (uint8_t) (y >> 8);
+            adxl345_buff[adxl345_buff_idx+4] = (uint8_t) z;
+            adxl345_buff[adxl345_buff_idx+5] = (uint8_t) (z >> 8);                        
+            //adxl.readAccel( &(adxl345_buff[adxl345_buff_idx]) );
+            adxl345_buff_idx += 6;
             adxl345_flag = false;
+        }
+        if(emg_flag) {
+            uint16_t val = adc->adc0->analogRead(EMG_PIN);
+            emg_buff[emg_buff_idx] = (uint8_t) val;
+            emg_buff[emg_buff_idx+1] = (uint8_t) (val >> 8);
+            emg_buff_idx+=2;
+            emg_flag = false;
+        }
+        if(spo2_flag) {
+            spo2_flag = false;
         }
         // Process and store collected data
         if (ecg_buff_idx%ECG_BUFFSIZE == 0) {
@@ -164,34 +203,59 @@ void loop() {
             
             rc = f_open(&fil, (TCHAR*)_T("test.bin"), FA_WRITE | FA_OPEN_EXISTING);
             rc = f_lseek(&fil, f_size(&fil));
-            // Write ECG Samples to buffer
-//            for(int i=0; i<ECG_BUFFSIZE; ++i) {
-//                buffer[2*i] = (uint8_t)(ecg_buff[i]);
-//                buffer[2*i+1] = (uint8_t)(ecg_buff[i] >> 8);
-//            }
-//            // Write ADXL345 data to buffer
-//            for(int i=0; i<ADXL345_BUFFSIZE; ++i) {
-//                buffer[2*i+ECG_BUFFSIZE] = (uint8_t)(adxl345_buff[i]);
-//                buffer[2*i+1+ECG_BUFFSIZE] = (uint8_t)(adxl345_buff[i] >> 8);
-//            }
 
-            for(int i=0; i<ECG_BUFFSIZE; ++i) {
-                buffer[8*i] = (uint8_t)(ecg_buff[i]);
-                buffer[8*i+1] = (uint8_t)(ecg_buff[i] >> 8);
-                buffer[8*i+2] = (uint8_t)(adxl345_buff[3*i]);
-                buffer[8*i+3] = (uint8_t)(adxl345_buff[3*i] >> 8);
-                buffer[8*i+4] = (uint8_t)(adxl345_buff[3*i+1]);
-                buffer[8*i+5] = (uint8_t)(adxl345_buff[3*i+1] >> 8);
-                buffer[8*i+6] = (uint8_t)(adxl345_buff[3*i+2]);
-                buffer[8*i+7] = (uint8_t)(adxl345_buff[3*i+2] >> 8);
-            }
+            memcpy(buffer, ecg_buff, ECG_BUFFSIZE);
+            memcpy(buffer+ECG_BUFFSIZE, emg_buff, EMG_BUFFSIZE);
+            memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE, spo2_buff, SPO2_BUFFSIZE);
+            memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE+SPO2_BUFFSIZE, adxl345_buff, ADXL345_BUFFSIZE);
+            // Store ECG Data
+//            for(int i=0; i<(ECG_BUFFSIZE << 1); i+=2) {
+//                buffer[i] = (uint8_t)(ecg_buff[(i >> 1)]);
+//                buffer[i+1] = (uint8_t)(ecg_buff[(i >> 1)] >> 8);
+//            }
+//            // Store EMG Data
+//            for(int i=(ECG_BUFFSIZE << 1); i<((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1); i+=2) {
+//                buffer[i] = (uint8_t)(emg_buff[(i >> 1)]);
+//                buffer[i+1] = (uint8_t)(emg_buff[(i >> 1)] >> 8); 
+//            }
+//            // Store SPO2 Data
+//            for(int i=((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1); i<((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1)+SPO2_BUFFSIZE; ++i) {
+//                buffer[i] = spo2_buff[i];
+//            }
+//            // Store ADXL Data | x | y | z |
+//            for(int i=((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1)+SPO2_BUFFSIZE; 
+//              i<((ECG_BUFFSIZE+EMG_BUFFSIZE+ADXL345_BUFFSIZE) << 1)+SPO2_BUFFSIZE; i+=6) {
+//                buffer[i] = (uint8_t)(adxl345_buff[i]);
+//                buffer[i+1] = (uint8_t)(adxl345_buff[i] >> 8);
+//                buffer[i+2] = (uint8_t)(adxl345_buff[i+1]);
+//                buffer[i+3] = (uint8_t)(adxl345_buff[i+1] >> 8);
+//                buffer[i+4] = (uint8_t)(adxl345_buff[i+2]);
+//                buffer[i+5] = (uint8_t)(adxl345_buff[i+2] >> 8);
+//              }
+            
+                
+//            for(int i=0; i<ECG_BUFFSIZE; ++i) {
+//                // Store ECG Data
+//                buffer[8*i] = (uint8_t)(ecg_buff[i]);
+//                buffer[8*i+1] = (uint8_t)(ecg_buff[i] >> 8);
+//                // Store EMG Data
+//                buffer[8*i+2] = (uint8_t)(emg_buff[i]);
+//                buffer[8*i+3] = (uint8_t)(emg_buff[i] >> 8);
+//                // Store AXDL345 Data | x | y | z |
+//                buffer[8*i+4] = (uint8_t)(adxl345_buff[3*i]);
+//                buffer[8*i+5] = (uint8_t)(adxl345_buff[3*i] >> 8);
+//                buffer[8*i+6] = (uint8_t)(adxl345_buff[3*i+1]);
+//                buffer[8*i+7] = (uint8_t)(adxl345_buff[3*i+1] >> 8);
+//                buffer[8*i+8] = (uint8_t)(adxl345_buff[3*i+2]);
+//                buffer[8*i+9] = (uint8_t)(adxl345_buff[3*i+2] >> 8);
+//            }
             
             rc = f_write(&fil, buffer, BUFFSIZE, &wr);
             rc = f_close(&fil);
             //digitalWriteFast(23, LOW);  
         }
        
-        digitalWriteFast(23, LOW);
+        //digitalWriteFast(23, LOW);
         interrupts();
     }
 }
@@ -221,6 +285,11 @@ void ADXL_ISR() {
 void ECG_ISR(void) {
     ecg_flag = true;
     adxl345_flag = true;
+    emg_flag = true;
+    if(!spo2_counter++%SPO2_SCALE) spo2_flag = true;
 }
 
+//void SPO2_ISR(void) {
+//    spo2_flag = true;
+//}
 // ********** //
