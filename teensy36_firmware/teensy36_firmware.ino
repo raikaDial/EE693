@@ -19,60 +19,26 @@
 // ***** DSP Stuff ***** //
 ECG_Filter ecg_filter;
 // Sign on 'a' coefficients is opposite of convention. Enter with caution.
-//iir_filter notch60Hz( (const float32_t[]){0.9582, 0.9582, 0.9582, 0.9582, 0.9163}, 1 ); // fs = 360,Hz
-iir_filter notch60Hz( (const float32_t[]){0.9408, -0.1181, 0.9408, 0.1181, 0.8816}, 1 ); // fs = 250,Hz
-iir_filter emgLP( (const float32_t[]){0.1453, 0.2906, 0.1453, 0.6710, -0.2533}, 1 ); // fs = 25- Hz
-//
-//iir_filter pan_tompkins_lp( 
-//    (const float32_t[]) {
-//        1.0000,    2.0000,    1.0000,      -2.0000,    1.0000,
-//        1.0000,    1.0000,    1.0000,            0,        0,
-//        1.0000,   -1.0000,    1.0000,            0,        0,
-//        1.0000,   -2.0000,    1.0000,           0,        0,
-//        1.0000,   -1.0000,    1.0000,          0,        0,
-//        1.0000,    1.0000,    1.0000,           0,        0      
-//    },
-//    6
-//);
-//
-//iir_filter pan_tompkins_hp( 
-//    (const float32_t[]) {
-//        1.0000,    0.2990,   -1.27230,     -1.0000,         0,
-//        1.0000,    2.3862,    1.6535,             0,        0,
-//        1.0000,    1.8497,    1.6424,            0,        0,
-//        1.0000,    1.0475,    1.6230,           0,        0,
-//        1.0000,    0.1031,    1.5938,           0,        0,
-//        1.0000,   -0.8369,    1.5519,           0,        0,
-//        1.0000,   -1.6236,    1.4908,            0,        0,
-//        1.0000,   -2.1199,    1.3924,           0,        0,
-//        1.0000,   -2.0000,    1.0000,          0,        0,
-//        1.0000,   -1.4782,    0.6973,           0,        0,
-//        1.0000,   -1.0040,    0.6487,           0,        0,
-//        1.0000,   -0.4104,    0.6220,       0,        0,
-//        1.0000,    0.2249,    0.6051,           0,        0,
-//        1.0000,    0.8094,    0.5942,            0,        0,
-//        1.0000,    1.2559,    0.5876,          0,        0,
-//        1.0000,    1.4974,    0.5844,          0,        0   
-//    },
-//    16
-//);
-//iir_filter pan_tompkins_dev( 
-//    (const float32_t[]) {
-//        1.0000,    0.0000,   -1.0000,        0,        0,
-//        1.0000,    0.5000,   1.0000,      0,        0
-//    },
-//    2
-//);
-
+iir_filter notch60Hz( (const float32_t[]){0.9408, -0.1181, 0.9408, 0.1181, 0.8816}, 1 ); // fs = 250 Hz
+iir_filter emgLP( (const float32_t[]){0.1453, 0.2906, 0.1453, 0.6710, -0.2533}, 1 ); // fs = 250 Hz
 // ********** //
 
 // ***** Sensor Sampling Stuff ***** //
 ADC *adc = new ADC(); // adc object
+const int ECG_PIN = A1;
+const int EMG_PIN = A2;
 
+// Timer Control
 const float scale_timer = 15.98;
-const uint32_t ECG_TS = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
+const uint32_t TS_250HZ = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
 const uint32_t SPO2_SCALE = 25; // Sample at 10 Hz, so 1/25 everything else
-uint16_t spo2_counter = 0;
+volatile uint16_t spo2_counter = 0; // Keep track of when to sample SPO2
+
+// ISR Flags
+volatile bool ecg_flag = 0;
+volatile bool adxl345_flag = 0;
+volatile bool emg_flag = 0;
+volatile bool spo2_flag = 0;
 
 // Buffers for sensors and their respective control variables
 #define ADXL345_BUFFSIZE 3*2*1000
@@ -88,12 +54,6 @@ uint16_t adxl345_buff_idx = 0;
 uint16_t spo2_buff_idx = 0;
 uint16_t emg_buff_idx = 0;
 
-const int ECG_PIN = A1;
-const int EMG_PIN = A2;
-volatile bool ecg_flag = 0;
-volatile bool adxl345_flag = 0;
-volatile bool emg_flag = 0;
-volatile bool spo2_flag = 0;
 // ********** //
 
 // ***** MicroSD Card Stuff ***** //
@@ -146,27 +106,21 @@ void setup() {
 
     rc = f_open(&fil, (TCHAR*)_T("test.bin"), FA_WRITE | FA_CREATE_ALWAYS);
     rc = f_close(&fil);
-
-//    Timer1.initialize(SPO2_TS);
-//    Timer1.attachInterrupt(SPO2_ISR);
-    Timer3.initialize(ECG_TS);
-    Timer3.attachInterrupt(ECG_ISR);
+    
+    Timer3.initialize(TS_250HZ);
+    Timer3.attachInterrupt(TS_250HZ_ISR);
 }
 
 void loop() {
     while(true) {
         sleep();
         noInterrupts();
-        //digitalWriteFast(23, HIGH);
         if(ecg_flag) {
-            //digitalWriteFast(22, HIGH);
             uint16_t val = adc->adc0->analogRead(ECG_PIN);
             ecg_buff[ecg_buff_idx] = (uint8_t) val;
             ecg_buff[ecg_buff_idx+1] = (uint8_t) (val >> 8);
             ecg_buff_idx+=2;
-            //ecg_buff[ecg_buff_idx++] = adc->adc0->analogRead(ECG_PIN);
             ecg_flag = false;
-           //digitalWriteFast(22, LOW);
         }
         if(adxl345_flag) {
             int16_t x, y, z;
@@ -177,7 +131,6 @@ void loop() {
             adxl345_buff[adxl345_buff_idx+3] = (uint8_t) (y >> 8);
             adxl345_buff[adxl345_buff_idx+4] = (uint8_t) z;
             adxl345_buff[adxl345_buff_idx+5] = (uint8_t) (z >> 8);                        
-            //adxl.readAccel( &(adxl345_buff[adxl345_buff_idx]) );
             adxl345_buff_idx += 6;
             adxl345_flag = false;
         }
@@ -193,7 +146,6 @@ void loop() {
         }
         // Process and store collected data
         if (ecg_buff_idx%ECG_BUFFSIZE == 0) {
-            //digitalWriteFast(23, HIGH);
             ecg_buff_idx = 0;
             adxl345_buff_idx = 0;
 
@@ -208,54 +160,9 @@ void loop() {
             memcpy(buffer+ECG_BUFFSIZE, emg_buff, EMG_BUFFSIZE);
             memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE, spo2_buff, SPO2_BUFFSIZE);
             memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE+SPO2_BUFFSIZE, adxl345_buff, ADXL345_BUFFSIZE);
-            // Store ECG Data
-//            for(int i=0; i<(ECG_BUFFSIZE << 1); i+=2) {
-//                buffer[i] = (uint8_t)(ecg_buff[(i >> 1)]);
-//                buffer[i+1] = (uint8_t)(ecg_buff[(i >> 1)] >> 8);
-//            }
-//            // Store EMG Data
-//            for(int i=(ECG_BUFFSIZE << 1); i<((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1); i+=2) {
-//                buffer[i] = (uint8_t)(emg_buff[(i >> 1)]);
-//                buffer[i+1] = (uint8_t)(emg_buff[(i >> 1)] >> 8); 
-//            }
-//            // Store SPO2 Data
-//            for(int i=((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1); i<((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1)+SPO2_BUFFSIZE; ++i) {
-//                buffer[i] = spo2_buff[i];
-//            }
-//            // Store ADXL Data | x | y | z |
-//            for(int i=((ECG_BUFFSIZE+EMG_BUFFSIZE) << 1)+SPO2_BUFFSIZE; 
-//              i<((ECG_BUFFSIZE+EMG_BUFFSIZE+ADXL345_BUFFSIZE) << 1)+SPO2_BUFFSIZE; i+=6) {
-//                buffer[i] = (uint8_t)(adxl345_buff[i]);
-//                buffer[i+1] = (uint8_t)(adxl345_buff[i] >> 8);
-//                buffer[i+2] = (uint8_t)(adxl345_buff[i+1]);
-//                buffer[i+3] = (uint8_t)(adxl345_buff[i+1] >> 8);
-//                buffer[i+4] = (uint8_t)(adxl345_buff[i+2]);
-//                buffer[i+5] = (uint8_t)(adxl345_buff[i+2] >> 8);
-//              }
-            
-                
-//            for(int i=0; i<ECG_BUFFSIZE; ++i) {
-//                // Store ECG Data
-//                buffer[8*i] = (uint8_t)(ecg_buff[i]);
-//                buffer[8*i+1] = (uint8_t)(ecg_buff[i] >> 8);
-//                // Store EMG Data
-//                buffer[8*i+2] = (uint8_t)(emg_buff[i]);
-//                buffer[8*i+3] = (uint8_t)(emg_buff[i] >> 8);
-//                // Store AXDL345 Data | x | y | z |
-//                buffer[8*i+4] = (uint8_t)(adxl345_buff[3*i]);
-//                buffer[8*i+5] = (uint8_t)(adxl345_buff[3*i] >> 8);
-//                buffer[8*i+6] = (uint8_t)(adxl345_buff[3*i+1]);
-//                buffer[8*i+7] = (uint8_t)(adxl345_buff[3*i+1] >> 8);
-//                buffer[8*i+8] = (uint8_t)(adxl345_buff[3*i+2]);
-//                buffer[8*i+9] = (uint8_t)(adxl345_buff[3*i+2] >> 8);
-//            }
-            
             rc = f_write(&fil, buffer, BUFFSIZE, &wr);
             rc = f_close(&fil);
-            //digitalWriteFast(23, LOW);  
         }
-       
-        //digitalWriteFast(23, LOW);
         interrupts();
     }
 }
@@ -282,14 +189,10 @@ void ADXL_ISR() {
   } 
 }
 
-void ECG_ISR(void) {
+void TS_250HZ_ISR(void) {
     ecg_flag = true;
     adxl345_flag = true;
     emg_flag = true;
-    if(!spo2_counter++%SPO2_SCALE) spo2_flag = true;
+    if(!spo2_counter++%SPO2_SCALE) spo2_flag = true; // 
 }
-
-//void SPO2_ISR(void) {
-//    spo2_flag = true;
-//}
 // ********** //
