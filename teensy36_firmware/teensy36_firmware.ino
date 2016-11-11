@@ -152,6 +152,7 @@ void loop() {
             emg_buff_idx = 0;
             adxl345_buff_idx = 0;
             spo2_buff_idx = 0;
+            uSD_counter = 0;
 
             //***** Data filtering goes here *****//
             //ecg_filter.pan85_filter(ecg_buff, (size_t)ECG_BUFFSIZE);
