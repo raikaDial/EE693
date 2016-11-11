@@ -30,7 +30,7 @@ const int EMG_PIN = A2;
 
 // Timer Control
 const float scale_timer = 15.98;
-const uint32_t TS_250HZ = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
+const uint32_t ECG_TS = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
 const uint32_t SPO2_SCALE = 25; // Sample at 10 Hz, so 1/25 everything else
 volatile uint16_t spo2_counter = 0; // Keep track of when to sample SPO2
 
@@ -53,6 +53,7 @@ uint16_t ecg_buff_idx = 0;
 uint16_t adxl345_buff_idx = 0;
 uint16_t spo2_buff_idx = 0;
 uint16_t emg_buff_idx = 0;
+uint16_t uSD_counter = 0;
 
 // ********** //
 
@@ -107,8 +108,8 @@ void setup() {
     rc = f_open(&fil, (TCHAR*)_T("test.bin"), FA_WRITE | FA_CREATE_ALWAYS);
     rc = f_close(&fil);
     
-    Timer3.initialize(TS_250HZ);
-    Timer3.attachInterrupt(TS_250HZ_ISR);
+    Timer3.initialize(ECG_TS);
+    Timer3.attachInterrupt(ECG_TS_ISR);
 }
 
 void loop() {
@@ -122,6 +123,13 @@ void loop() {
             ecg_buff_idx+=2;
             ecg_flag = false;
         }
+        if(emg_flag) {
+            uint16_t val = adc->adc0->analogRead(EMG_PIN);
+            emg_buff[emg_buff_idx] = (uint8_t) val;
+            emg_buff[emg_buff_idx+1] = (uint8_t) (val >> 8);
+            emg_buff_idx+=2;
+            emg_flag = false;
+        }
         if(adxl345_flag) {
             int16_t x, y, z;
             adxl.readAccel(&x, &y, &z);
@@ -134,20 +142,16 @@ void loop() {
             adxl345_buff_idx += 6;
             adxl345_flag = false;
         }
-        if(emg_flag) {
-            uint16_t val = adc->adc0->analogRead(EMG_PIN);
-            emg_buff[emg_buff_idx] = (uint8_t) val;
-            emg_buff[emg_buff_idx+1] = (uint8_t) (val >> 8);
-            emg_buff_idx+=2;
-            emg_flag = false;
-        }
         if(spo2_flag) {
             spo2_flag = false;
         }
         // Process and store collected data
-        if (ecg_buff_idx%ECG_BUFFSIZE == 0) {
+        if (!(++uSD_counter%(ECG_BUFFSIZE >> 1))) {
+            digitalWrite(23, HIGH);
             ecg_buff_idx = 0;
+            emg_buff_idx = 0;
             adxl345_buff_idx = 0;
+            spo2_buff_idx = 0;
 
             //***** Data filtering goes here *****//
             //ecg_filter.pan85_filter(ecg_buff, (size_t)ECG_BUFFSIZE);
@@ -158,10 +162,12 @@ void loop() {
 
             memcpy(buffer, ecg_buff, ECG_BUFFSIZE);
             memcpy(buffer+ECG_BUFFSIZE, emg_buff, EMG_BUFFSIZE);
-            memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE, spo2_buff, SPO2_BUFFSIZE);
-            memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE+SPO2_BUFFSIZE, adxl345_buff, ADXL345_BUFFSIZE);
+            memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE, adxl345_buff, ADXL345_BUFFSIZE);
+            memcpy(buffer+ECG_BUFFSIZE+EMG_BUFFSIZE+ADXL345_BUFFSIZE, spo2_buff, SPO2_BUFFSIZE);
             rc = f_write(&fil, buffer, BUFFSIZE, &wr);
             rc = f_close(&fil);
+            digitalWrite(23, LOW);
+            
         }
         interrupts();
     }
@@ -189,10 +195,12 @@ void ADXL_ISR() {
   } 
 }
 
-void TS_250HZ_ISR(void) {
+void ECG_TS_ISR(void) {
+    //digitalWrite(23, HIGH);
     ecg_flag = true;
     adxl345_flag = true;
     emg_flag = true;
     if(!spo2_counter++%SPO2_SCALE) spo2_flag = true; // 
+    //digitalWrite(23, LOW);
 }
 // ********** //
