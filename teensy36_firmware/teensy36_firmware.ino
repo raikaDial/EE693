@@ -26,7 +26,7 @@ iir_filter emgLP( (const float32_t[]){0.1453, 0.2906, 0.1453, 0.6710, -0.2533}, 
 iir_filter ecgBP( (const float32_t[]){0.1122, 0, -0.1122, 1.7336, -0.7757}, 1 );// fs = 250 Hz, Passband = 5 - 15 Hz
 iir_filter emgHP_20( (const float32_t[]){.6998, -1.3995, 0.6998, 1.3073, -0.4918}, 1 ); // fs = 250 Hz
 iir_filter emgLP_70( (const float32_t[]){0.3503, 0.7007, 0.3503, -0.2212, -0.1802}, 1 ); // fs = 250 Hz
-
+iir_filter emgBP( (const float32_t[]){0.4208, 0, -0.4208, 0.6096, -0.1584}, 1 ); // fs = 250 Hz Passband = 20 - 70 Hz
 // ********** //
 
 // ***** Sensor Sampling Stuff ***** //
@@ -84,7 +84,8 @@ TCHAR * char2tchar( char * charString, size_t nn, TCHAR * tcharString) {
 }
 
 //#define BUFFSIZE 2*ECG_BUFFSIZE+2*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
-#define BUFFSIZE 4*ECG_BUFFSIZE+2*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
+//#define BUFFSIZE 4*ECG_BUFFSIZE+2*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
+#define BUFFSIZE 4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
 uint8_t buffer[BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 //uint8_t magic_nums[] = {'E', 'E', '6', '9', '3'};
 
@@ -216,6 +217,10 @@ void loop() {
             if (sing_trig>10){ //change to movement threshold 
               choice=1;
             ecgBP.filter(ecg_buff, ecg_buff_filt, NUMSAMPLES);
+            emgBP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
+            //ecg_filter.sh_filter(ecg_buff_temp, (size_t)ECG_BUFFSIZE,  choice); 
+           
+            //ecgBP.filter(ecg_buff, ecg_buff_filt, NUMSAMPLES);
             //ecg_filter.sh_filter(ecg_buff_temp, (size_t)ECG_BUFFSIZE,  choice); 
             sing_trig=0; //reset the single trigger for movement
             }
