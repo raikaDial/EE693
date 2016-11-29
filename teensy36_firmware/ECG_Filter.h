@@ -2,12 +2,15 @@
 #define ECG_FILTER_H
 
 #include "Arduino.h"
+#include <arm_math.h>
+#include <Arduino.h>
 
 class ECG_Filter {
     public:
         uint16_t pan85_countpeaks(float* signal, size_t length);
         void pan85_filter(float* signal, size_t length);
         
+        void sh_filter(float32_t* signal, size_t length, size_t choice); 
         void pan85_filter(uint16_t* signal, size_t length);
         uint16_t pan85_countpeaks(uint16_t* signal, size_t length);
     private:
@@ -15,6 +18,8 @@ class ECG_Filter {
         void pan85_lp(float* signal, float* output, size_t length);
         void pan85_hp(float* signal, float* output, size_t length);
         void pan85_dev(float* signal, float* output, size_t length);
+        void IIR_but_70_lp(float32_t* signal, float32_t* output, size_t length); 
+        void IIR_but_20_hp(float32_t* signal, float32_t* output, size_t length);
 
         void pan85_lp(uint16_t* signal, uint16_t* output, size_t length);
         void pan85_hp(uint16_t* signal, uint16_t* output, size_t length);
@@ -52,4 +57,3 @@ class ECG_Filter {
 };
 
 #endif //ECG_FILTER_H
-

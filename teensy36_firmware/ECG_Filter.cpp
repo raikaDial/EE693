@@ -1,4 +1,5 @@
 #include "ECG_Filter.h"
+#include <arm_math.h>
 
 uint16_t ECG_Filter::pan85_countpeaks(float* signal, size_t length) {
     uint16_t numpeaks = 1;
@@ -201,3 +202,74 @@ void ECG_Filter::pan85_dev(uint16_t* signal, uint16_t* output, size_t length) {
     for(int n=0; n<4; ++n)
         past_inputs[n] = signal[(length-1) - 3 + n];
 }
+
+
+
+
+void ECG_Filter::sh_filter(float32_t* signal, size_t length, size_t choice){
+if(length > 128) {
+       float32_t* buff = new float32_t[length];
+        switch (choice){
+          case 1:
+        IIR_but_70_lp(signal,buff,length); //emg high and low pass filters
+        IIR_but_20_hp(buff,signal,length); 
+          break;
+          case 2:
+        IIR_but_70_lp(signal,buff,length); //emg high and low pass filters
+        IIR_but_20_hp(buff,signal,length);  
+          break;
+          case 3:
+          //do something here 
+          break;
+          
+          default: 
+          //do standard filters here 
+          break;
+        }
+        if(transient_included) {
+            for(size_t i=0; i<50; ++i)
+                signal[i] = 0;
+            transient_included = false;
+        }
+        delete [] buff;
+    }
+}
+
+
+//lp filter at 70 to be applied to EMG for noise removal along with high pass at 20hz
+void ECG_Filter::IIR_but_70_lp(float32_t* signal, float32_t* output, size_t length) {//2nd order lp filter 70 hz IIR
+    static int16_t past_inputs[2] = {};
+  static int16_t past_outputs[2] = {};
+    // Initial Conditions
+    output[0] = 0.3503*signal[0] + 0.7007*past_inputs[1] + 0.3503*past_inputs[0]+ 0.2212*past_outputs[1] + 0.1802*past_outputs[0];
+    output[1] = 0.3503*signal[1] + 0.7007*signal[0]      + 0.3503*past_inputs[1]+ 0.2212*output[0]     + 0.1802*past_outputs[1];
+  
+    for(int n=2; n<length; ++n)
+    output[n] = 0.3503*signal[n] + 0.7007*signal[n-1]    + 0.3503*signal[n-2]   + 0.2212*output[n-1]    + 0.1802*output[n-2];
+  
+    for(size_t n=0; n<2; ++n)
+        past_inputs[n] = signal[(length-1) - 1+ n];
+  
+  past_outputs[0]=output[(length-1)-1];
+  past_outputs[1]=output[(length-1)];
+}
+
+void ECG_Filter::IIR_but_20_hp(float32_t* signal, float32_t* output, size_t length) { //2nd order IIR butterworth filter 20hz hp
+  static int16_t past_inputs[2] = {};
+  static int16_t past_outputs[2] = {};
+    // Initial Conditions
+    output[0] = 0.6998*signal[0] - 1.3995*past_inputs[1] + 0.6998*past_inputs[0]  - 1.3073*past_outputs[1] + 0.4918*past_outputs[0];
+    output[1] = 0.6998*signal[1] - 1.3995*signal[0]      + 0.6998*past_inputs[1]  - 1.3073*output[0]     + 0.4918*past_outputs[1];
+  
+    for(int n=2; n<length; ++n)
+    output[n] = 0.6998*signal[n] - 1.3995*signal[n-1]    + 0.6998*signal[n-2]     - 1.3073*output[n-1]    + 0.4918*output[n-2];
+  
+    for(size_t n=0; n<2; ++n)
+        past_inputs[n] = signal[(length-1) - 1+ n];
+  
+  past_outputs[0]=output[(length-1)-1];
+  past_outputs[1]=output[(length-1)];
+
+}
+
+

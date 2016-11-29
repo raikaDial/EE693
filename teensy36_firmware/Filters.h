@@ -35,4 +35,5 @@ void iir_filter::filter(float32_t* input, float32_t* output, uint32_t blockSize)
 	arm_biquad_cascade_df2T_f32(&filt, input, output, blockSize);
 }
 
+
 #endif //FILTERS_H_INCLUDED
