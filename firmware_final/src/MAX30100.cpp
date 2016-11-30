@@ -22,26 +22,27 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "MAX30100.h"
 
-MAX30100::MAX30100()
-{
+MAX30100::MAX30100(uint8_t num_var) : num_samples_var(num_var), ac_idx(0) {
+    irACValue = new float [num_samples_var];
+    redACValue = new float [num_samples_var];
+    irDCRemover = DCRemover(DC_REMOVER_ALPHA);
+    redDCRemover = DCRemover(DC_REMOVER_ALPHA);
+}
+
+MAX30100::~MAX30100() {
+    delete [] irACValue;
+    delete [] redACValue;
 }
 
 void MAX30100::begin()
 {
     Wire.begin(I2C_MASTER, 0x00, I2C_PINS_18_19, I2C_PULLUP_EXT, I2C_BUS_SPEED, I2C_OP_MODE_DMA);
-    //Wire.setOpMode(I2C_OP_MODE_DMA);
-
-    // Wire.begin();
-    // Wire.setClock(I2C_BUS_SPEED);
 
     setMode(DEFAULT_MODE);
     setLedsPulseWidth(DEFAULT_PULSE_WIDTH);
     setSamplingRate(DEFAULT_SAMPLING_RATE);
     setLedsCurrent(DEFAULT_IR_LED_CURRENT, DEFAULT_RED_LED_CURRENT);
     setHighresModeEnabled(true);
-
-    irDCRemover = DCRemover(DC_REMOVER_ALPHA);
-    redDCRemover = DCRemover(DC_REMOVER_ALPHA);
 }
 
 void MAX30100::setMode(Mode mode)
@@ -74,11 +75,6 @@ void MAX30100::setHighresModeEnabled(bool enabled)
     } else {
         writeRegister(MAX30100_REG_SPO2_CONFIGURATION, previous & ~MAX30100_SPC_SPO2_HI_RES_EN);
     }
-}
-
-void MAX30100::update()
-{
-    readFifoData();
 }
 
 uint8_t MAX30100::readRegister(uint8_t address)

@@ -24,12 +24,17 @@ ADC *adc = new ADC(); // adc object
 const int ECG_PIN = A1;
 const int EMG_PIN = A2;
 
-MAX30100 spo2_sensor;
-
 // Timer Control
-const float scale_timer = 15.4;
+const float scale_timer = 15.4; // Need to scale the sampling frequency to account for time spent in sleep mode. Since
+                                //     the timers are based on the clock speed, and the clock speed goes from 180 MHz
+                                //     to 2 MHz for sleep mode, need to manually fine tune this value to account for this.
 const uint32_t sampling_timer_TS = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
-const uint32_t SPO2_SCALE = 25; // Sample at 10 Hz, so 1/25 everything else
+
+// SPO2 Stuff
+const uint32_t SPO2_SCALE = 5;  // Sample SPO2 sensor at 250/5 = 50 Hz.
+const uint32_t SPO2_NUMVAR = 5; // Use 5 raw samples from the SPO2 sensor to calculate the variance of the IR and red
+                                //     light and determine the SPO2 concentration. This puts actual SPO2 fs at 10 Hz.
+MAX30100 spo2_sensor(SPO2_NUMVAR);
 volatile uint16_t spo2_counter = 0; // Keep track of when to sample SPO2
 
 // ISR Flags
@@ -41,7 +46,9 @@ void sampling_timer_isr(void) {
     ecg_flag = true;
     adxl345_flag = true;
     emg_flag = true;
-    spo2_sensor.readFifoData();
+
+    if(!(++spo2_counter%SPO2_SCALE))
+        spo2_sensor.readFifoData();
 }
 
 // Buffers for sensors and their respective control variables
@@ -50,7 +57,6 @@ void sampling_timer_isr(void) {
 #define ECG_BUFFSIZE 1000
 #define EMG_BUFFSIZE 1000
 #define SPO2_BUFFSIZE 40
-//uint16_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t ecg_buff_filt[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t emg_buff[EMG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
@@ -78,7 +84,7 @@ float32_t ecgMA_coeffs[37] = {
     1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37,
     1/37
 };
-fir_filter ecgMA(ecgMA_coeffs, 37, NUMSAMPLES);
+fir_filter ecgMA(ecgMA_coeffs, 37, NUMSAMPLES); // Moving Average Filter
 // ********** //
 
 // ***** MicroSD Card Stuff ***** //
@@ -109,9 +115,9 @@ ADXL345 adxl = ADXL345(10);
 // ***** Pulse Oximeter Stuff ***** //
 
 //
-//// SaO2 Look-up Table
-//// http://www.ti.com/lit/an/slaa274b/slaa274b.pdf
-//const uint8_t spO2LUT[43] = {100,100,100,100,99,99,99,99,99,99,98,98,98,98,
+// // SaO2 Look-up Table
+// // http://www.ti.com/lit/an/slaa274b/slaa274b.pdf
+// const uint8_t spO2LUT[43] = {100,100,100,100,99,99,99,99,99,99,98,98,98,98,
 //                             98,97,97,97,97,97,97,96,96,96,96,96,96,95,95,
 //                             95,95,95,95,94,94,94,94,94,93,93,93,93,93};
 // ********** //
@@ -182,8 +188,33 @@ void loop() {
     }
     if(Wire.spo2_flag) {
         digitalWriteFast(22, HIGH);
+        // Read latest raw data
         uint16_t rawIRValue = Wire.spo2_bytes[0] << 8 | Wire.spo2_bytes[1];
         uint16_t rawRedValue = Wire.spo2_bytes[2] << 8 | Wire.spo2_bytes[3];
+
+        // Remove DC Component from raw data
+        spo2_sensor.irACValue[spo2_sensor.ac_idx] = spo2_sensor.irDCRemover.step((float)rawIRValue);
+        spo2_sensor.redACValue[spo2_sensor.ac_idx] = spo2_sensor.redDCRemover.step((float)rawRedValue);
+
+        // If we have collected enough samples, calculate variance, then spo2;
+        if(!(++spo2_sensor.ac_idx%spo2_sensor.num_samples_var)) {
+            float irACValueSqSum = 0;
+            float redACValueSqSum = 0;
+            for(int i=0; i<spo2_sensor.num_samples_var; ++i) {
+                irACValueSqSum += (float)spo2_sensor.irACValue[i]*(float)spo2_sensor.irACValue[i];
+                redACValueSqSum += (float)spo2_sensor.redACValue[i]*(float)spo2_sensor.redACValue[i];
+            }
+            float acSqRatio = 100.0*log(redACValueSqSum/spo2_sensor.num_samples_var)/log(irACValueSqSum/spo2_sensor.num_samples_var);
+
+            // Determine index in SPO2 Lookup Table
+            uint8_t index = 0;
+            if (acSqRatio > 66)
+                index = (uint8_t)acSqRatio - 66;
+            else if (acSqRatio > 50)
+                index = (uint8_t)acSqRatio - 50;
+
+            spo2_buff[spo2_buff_idx++] = spo2_sensor.spO2LUT[index];
+        }
 
         Wire.spo2_flag = false;
         digitalWriteFast(22, LOW);

@@ -26,47 +26,47 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "MAX30100_Filters.h"
 
 #define DEFAULT_MODE				MAX30100_MODE_SPO2_HR
-#define DEFAULT_SAMPLING_RATE       MAX30100_SAMPRATE_200HZ
+#define DEFAULT_SAMPLING_RATE       MAX30100_SAMPRATE_50HZ
 #define DEFAULT_PULSE_WIDTH         MAX30100_SPC_PW_1600US_16BITS
 #define DEFAULT_RED_LED_CURRENT     MAX30100_LED_CURR_27_1MA
 #define DEFAULT_IR_LED_CURRENT      MAX30100_LED_CURR_50MA
 
 #define I2C_BUS_SPEED               400000UL
-#define I2C_INT_PIN                 17
 
-#define DC_REMOVER_ALPHA            0.95
+#define DC_REMOVER_ALPHA 95
 
 class MAX30100 {
 public:
-    MAX30100();
+    MAX30100(uint8_t num_var);
+    ~MAX30100();
     void begin();
     void setMode(Mode mode);
     void setLedsPulseWidth(LEDPulseWidth ledPulseWidth);
     void setSamplingRate(SamplingRate samplingRate);
     void setLedsCurrent(LEDCurrent irLedCurrent, LEDCurrent redLedCurrent);
     void setHighresModeEnabled(bool enabled);
-    void update();
 
-    volatile uint16_t rawIRValue[25];
-    volatile uint16_t rawRedValue[25];
-    volatile uint8_t raw_idx = 0;
-    volatile uint8_t spo2;
-
-    // Extra Stuff for Consolidation
-    DCRemover irDCRemover;
-    DCRemover redDCRemover;
-    volatile float irACValue[25];
-    volatile float irACValueSqSum;
-    volatile float redACValue[25];
-    volatile float redACValueSqSum;
-
-//private:
     uint8_t readRegister(uint8_t address);
     void writeRegister(uint8_t address, uint8_t data);
     void burstRead(uint8_t baseAddress, uint8_t length);
     void readFifoData();
-    volatile bool burstReadOp = false;
-    volatile bool spo2_ready = false;
+
+    // Extra Variables for consolidation.
+    uint8_t num_samples_var;
+    uint32_t ac_idx;
+    float* irACValue;
+    float* redACValue;
+    DCRemover irDCRemover;
+    DCRemover redDCRemover;
+
+    // SaO2 Look-up Table
+    // http://www.ti.com/lit/an/slaa274b/slaa274b.pdf
+    const uint8_t spO2LUT[43] = {
+        100,100,100,100,99,99,99,99,99,99,98,98,98,98,
+        98,97,97,97,97,97,97,96,96,96,96,96,96,95,95,
+        95,95,95,95,94,94,94,94,94,93,93,93,93,93
+    };
+
 };
 
 #endif
