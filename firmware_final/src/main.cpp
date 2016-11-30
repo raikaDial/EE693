@@ -6,7 +6,6 @@
 #define ARM_MATH_CM4
 #define __FPU_PRESENT 1
 #include <arm_math.h>
-//#include "ECG_Filter.h"
 #include "Filters.h"
 #include <SPI.h>
 #include <ADC.h>
@@ -51,7 +50,7 @@ void sampling_timer_isr(void) {
         spo2_sensor.readFifoData();
 }
 
-// Buffers for sensors and their respective control variables
+// Buffers for sensors and their respective control variables.
 #define NUMSAMPLES 1000
 #define ADXL345_BUFFSIZE 3*1000
 #define ECG_BUFFSIZE 1000
@@ -71,7 +70,6 @@ uint16_t emg_buff_idx = 0;
 
 // ***** DSP Stuff ***** //
 // Sign on 'a' coefficients is opposite of convention. Enter with caution.
-
 iir_filter notch60Hz( (const float32_t[]){0.9408, -0.1181, 0.9408, 0.1181, 0.8816}, 1 ); // fs = 250 Hz
 iir_filter emgLP( (const float32_t[]){0.0021, 0.0042, 0.0021, 1.8669, -0.8752}, 1 ); // fs = 250 Hz
 
@@ -110,16 +108,6 @@ uint8_t buffer[BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 // ***** ADXL345 Stuff ***** //
 const uint16_t ADXL_CS_PIN = 10;
 ADXL345 adxl = ADXL345(10);
-// ********** //
-
-// ***** Pulse Oximeter Stuff ***** //
-
-//
-// // SaO2 Look-up Table
-// // http://www.ti.com/lit/an/slaa274b/slaa274b.pdf
-// const uint8_t spO2LUT[43] = {100,100,100,100,99,99,99,99,99,99,98,98,98,98,
-//                             98,97,97,97,97,97,97,96,96,96,96,96,96,95,95,
-//                             95,95,95,95,94,94,94,94,94,93,93,93,93,93};
 // ********** //
 
 // ***** Low Power Mode Stuff ***** //
@@ -196,10 +184,13 @@ void loop() {
         spo2_sensor.irACValue[spo2_sensor.ac_idx] = spo2_sensor.irDCRemover.step((float)rawIRValue);
         spo2_sensor.redACValue[spo2_sensor.ac_idx] = spo2_sensor.redDCRemover.step((float)rawRedValue);
 
-        // If we have collected enough samples, calculate variance, then spo2;
+        // If we have collected enough samples, calculate SPO2
         if(!(++spo2_sensor.ac_idx%spo2_sensor.num_samples_var)) {
+            spo2_sensor.ac_idx = 0;
             float irACValueSqSum = 0;
             float redACValueSqSum = 0;
+
+            // Calculate ratio of variance
             for(int i=0; i<spo2_sensor.num_samples_var; ++i) {
                 irACValueSqSum += (float)spo2_sensor.irACValue[i]*(float)spo2_sensor.irACValue[i];
                 redACValueSqSum += (float)spo2_sensor.redACValue[i]*(float)spo2_sensor.redACValue[i];
@@ -233,7 +224,7 @@ void loop() {
         // ecgDev.filter(ecg_buff_filt, ecg_buff_filt);
         // for(int i=0; i<NUMSAMPLES; ++i) // square the ecg signal
         //     ecg_buff_filt[i] = ecg_buff_filt[i]*ecg_buff_filt[i];
-        ecgMA.filter(ecg_buff_filt, ecg_buff_filt);
+        //ecgMA.filter(ecg_buff_filt, ecg_buff_filt);
         //emgLP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
         // ********** //
 
@@ -254,28 +245,3 @@ void loop() {
     interrupts();
     digitalWriteFast(23, LOW);
 }
-
-// ***** Interrupt Service Routines ***** //
-// void ADXL_ISR() {
-//   // getInterruptSource clears all triggered actions after returning value
-//   // Do not call again until you need to recheck for triggered actions
-//   byte interrupts = adxl.getInterruptSource();
-//
-//   if(adxl.triggered(interrupts, ADXL345_FREE_FALL)){
-//   }
-//
-//   if(adxl.triggered(interrupts, ADXL345_INACTIVITY)){
-//   }
-//
-//   if(adxl.triggered(interrupts, ADXL345_ACTIVITY)){
-//   }
-//
-//   if(adxl.triggered(interrupts, ADXL345_DOUBLE_TAP)){
-//   }
-//
-//   if(adxl.triggered(interrupts, ADXL345_SINGLE_TAP)){
-//   }
-// }
-
-
-// ********** //
