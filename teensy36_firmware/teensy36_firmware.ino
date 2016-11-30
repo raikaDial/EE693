@@ -48,6 +48,8 @@ volatile bool spo2_flag = 0;
 int sing_trig= 0;
 int doub_trig= 0;
 size_t choice=1; //decide 1 for only using a low and high pass filter and anything else for using all filters
+size_t option=0; //change this to 1 to test variable resampling of ecg data 
+
 
 // Buffers for sensors and their respective control variables
 #define NUMSAMPLES 1000
@@ -55,18 +57,28 @@ size_t choice=1; //decide 1 for only using a low and high pass filter and anythi
 #define ECG_BUFFSIZE 1000
 #define EMG_BUFFSIZE 1000
 #define SPO2_BUFFSIZE 40
-//uint16_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+
 float32_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+
 float32_t ecg_buff_filt[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t emg_buff[EMG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t emg_buff_filt[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 uint8_t spo2_buff[SPO2_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 int16_t adxl345_buff[ADXL345_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+
+/***resampling***/
+float32_t ecg_buff_resampled[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );//resampling buffers
+uint8_t sample_num[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
+uint16_t resamp_idx =0;
+float32_t lower; //this is used in resampling 
+float32_t upper;
+
+
 uint16_t ecg_buff_idx = 0;
 uint16_t adxl345_buff_idx = 0;
 uint16_t spo2_buff_idx = 0;
 uint16_t emg_buff_idx = 0;
-// ********** //
+
 
 // ***** MicroSD Card Stuff ***** //
 FRESULT rc;        /* Result code */
@@ -83,13 +95,10 @@ TCHAR * char2tchar( char * charString, size_t nn, TCHAR * tcharString) {
     return tcharString;
 }
 
-//#define BUFFSIZE 2*ECG_BUFFSIZE+2*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
-//#define BUFFSIZE 4*ECG_BUFFSIZE+2*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
 #define BUFFSIZE 4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
 uint8_t buffer[BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 //uint8_t magic_nums[] = {'E', 'E', '6', '9', '3'};
 
-// ********** //
 
 // ***** ADXL345 Stuff ***** //
 const uint16_t ADXL_CS_PIN = 10;
@@ -135,14 +144,16 @@ void setup() {
     adxl.powerOn();
     adxl.setRangeSetting(16);
     adxl.setImportantInterruptMapping(1, 1, 1, 1, 1); // Put all interrupts on pin 1
+    adxl.setTapDetectionOnXYZ(1, 0, 0); // Detect taps in the directions turned ON "adxl.setTapDetectionOnX(X, Y, Z);" (1 == ON, 0 == OFF)
  
     // Set values for what is considered a TAP and what is a DOUBLE TAP (0-255)
     adxl.setTapThreshold(35);           // 62.5 mg per increment
     adxl.setTapDuration(10);            // 625 μs per increment
     adxl.setDoubleTapLatency(80);       // 1.25 ms per increment
     adxl.setDoubleTapWindow(200);       // 1.25 ms per increment
-      
-    // Setup Pulse Oximeter
+    adxl.singleTapINT(1);
+    
+// Setup Pulse Oximeter
 //    spo2_sensor.begin();
 //    pinMode(I2C_INT_PIN, INPUT);
 //    attachInterrupt(I2C_INT_PIN, burstRead_ISR, RISING); // triggers when I2C transfer is complete
@@ -210,30 +221,63 @@ void loop() {
             emg_buff_idx = 0;
             adxl345_buff_idx = 0;
             spo2_buff_idx = 0;
-
+            resamp_idx=0;
             
             //***** Data filtering goes here *****//
-            sing_trig=20;
-            if (sing_trig>10){ //change to movement threshold 
-              choice=1;
+            //sing_trig=20; //this is for testing purposes 
+            if (sing_trig>6){ //change to movement threshold 
+             // choice=1; //this is used only in the sh_filter
             ecgBP.filter(ecg_buff, ecg_buff_filt, NUMSAMPLES);
             emgBP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
             //ecg_filter.sh_filter(ecg_buff_temp, (size_t)ECG_BUFFSIZE,  choice); 
-           
-            //ecgBP.filter(ecg_buff, ecg_buff_filt, NUMSAMPLES);
-            //ecg_filter.sh_filter(ecg_buff_temp, (size_t)ECG_BUFFSIZE,  choice); 
             sing_trig=0; //reset the single trigger for movement
             }
-            else if (sing_trig>5){
-              choice=2;
-            //emgLP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
-            emgLP_70.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
-            emgHP_20.filter(emg_buff_filt, emg_buff_filt, NUMSAMPLES);
+            else if (sing_trig>3){
+              //choice=2; //this is used only in the sh_filter
+            ecgBP.filter(ecg_buff, ecg_buff_filt, NUMSAMPLES);
+            emgBP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
            // ecg_filter.sh_filter(ecg_buff, (size_t)ECG_BUFFSIZE,  choice); 
             sing_trig=0; //reset the single trigger for movement
             
             }
-            //end filtering based on movement
+            sing_trig=0; //needs to be cleared for every set of samples 
+//*******end filtering based on movement********//
+
+
+//*****************optional resampling starts here*******// 
+            if (option==1){
+
+              //do some variable re-sampling of the current ecg data and store it in this area 
+              //ecg data would have to be stored by itself in order to use a simple parser of the new data
+            for(int n=1; n<ECG_BUFFSIZE; ++n){
+            lower=ecg_buff[n-1]-(0.05*ecg_buff[n-1]);
+            upper=ecg_buff[n-1]+(0.05*ecg_buff[n-1]);
+            if (!((ecg_buff[n]<upper) &&(ecg_buff[n]>lower)))
+            {
+              ecg_buff_resampled[resamp_idx]=ecg_buff[n]; //store the current if its unique compared to neighboring
+              sample_num[resamp_idx]= n; //store the time variable for the stored ecg
+              ++resamp_idx;
+              
+            } //ends if 
+                //dont store, move to next variable if difference is within threshold
+            }//ends for 
+            //may need to delete ecg_buff_resampled and sample_num arrays 
+
+            //storing of the new re-sampled data 
+            rc = f_open(&fil, (TCHAR*)_T("test_ECG_ONLY.bin"), FA_WRITE | FA_OPEN_EXISTING);
+            rc = f_lseek(&fil, f_size(&fil));
+
+            //need to figure out how to only save as much as we need based on the amount resampled
+            const uint8_t ARRAY_SIZE = sizeof(sample_num) / sizeof(uint8_t);
+            
+            memcpy(buffer, (uint8_t*)ecg_buff_resampled, 4*resamp_idx);
+            memcpy(buffer+4*resamp_idx, (uint8_t*)sample_num, resamp_idx);
+            rc = f_write(&fil, buffer, BUFFSIZE, &wr);
+            rc = f_close(&fil);
+            
+            }
+//*********reampling ends here***********//
+
 
              rc = f_open(&fil, (TCHAR*)_T("test_unfiltered.bin"), FA_WRITE | FA_OPEN_EXISTING);
             //rc = f_open(&fil, wfname, FA_WRITE | FA_OPEN_EXISTING);
@@ -284,7 +328,9 @@ void ADXL_ISR() {
   }
   
   if(adxl.triggered(interrupts, ADXL345_SINGLE_TAP)){
+    //digitalWrite(23, HIGH);
     ++sing_trig;
+    //digitalWrite(23, LOW);
   } 
 }
 
@@ -334,3 +380,5 @@ void ECG_TS_ISR(void) {
 //    }
 //}    
 // ********** //
+
+//comment 

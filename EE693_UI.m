@@ -112,7 +112,7 @@ fs = 250;
 fs_spo2 = 10;
 t = 0:1/fs:(length(ecgData)-1)/fs;
 t_spo2 = 0:1/fs_spo2:(length(spo2Data)-1)/fs_spo2;
-t_accel = 0:1/fs:(length(adxlData)-1)/fs;
+
 % Plot ECG Data
 figure('Name', 'ECG Data')
 plot(t, ecgData);
@@ -126,37 +126,26 @@ title('EMG Data')
 xlabel('Time (s)')
 
 % Plot Accelerometer Data
-
-maxadxl_scale=max([adxlData(2,:);adxlData(3,:);adxlData(1,:)]);
-maxadxl_scale=max(maxadxl_scale(:,:,:));
-
-minadxl_scale=min([adxlData(2,:);adxlData(3,:);adxlData(1,:)]);
-minadxl_scale=min(minadxl_scale(:,:,:));
-
-figure('Name', 'Accel_')
+figure('Name', 'Accelerometer')
 subplot(3,1,1)
-plot(t_accel, adxlData(1,:))
-axis([0,max(t_accel),minadxl_scale,maxadxl_scale])
+plot(t, adxlData(1,:))
 title('Accelerometer x-axis')
 xlabel('Time (s)')
-ylabel('ft^2/s')
+ylabel('ft/s^2')
 subplot(3,1,2)
-plot(t_accel, adxlData(2,:))
-axis([0,max(t_accel),minadxl_scale,maxadxl_scale])
+plot(t, adxlData(2,:))
 title('Accelerometer y-axis')
 xlabel('Time (s)')
-ylabel('ft^2/s')
+ylabel('ft/s^2')
 subplot(3,1,3)
-plot(t_accel, adxlData(3,:))
-axis([0,max(t_accel),minadxl_scale,maxadxl_scale])
+plot(t, adxlData(3,:))
 title('Accelerometer z-axis')
 xlabel('Time (s)')
-ylabel('ft^2/s')
-saveas(gcf,[pathName,'_ADXL'],'png')
+ylabel('ft/s^2')
 
-% % Plot SPO2 Data
-% figure('Name', 'SPO2')
-% plot(t_spo2, spo2Data)
-% title('SPO2')
-% xlabel('Time (s)')
-% ylabel('%')
+% Plot SPO2 Data
+figure('Name', 'SPO2')
+plot(t_spo2, spo2Data)
+title('SPO2')
+xlabel('Time (s)')
+ylabel('%')
