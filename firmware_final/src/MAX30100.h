@@ -33,7 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #define I2C_BUS_SPEED               400000UL
 
-#define DC_REMOVER_ALPHA 95
+#define DC_REMOVER_ALPHA 0.95
 
 class MAX30100 {
 public:
