@@ -11,8 +11,9 @@ ECG_BLOCKSIZE = 1000;
 EMG_BLOCKSIZE = 1000;
 ADXL_BLOCKSIZE = 3*1000;
 SPO2_BLOCKSIZE = 40;
+FLAG_BYTES = 2;
 BLOCKSIZE = 4*ECG_BLOCKSIZE+4*EMG_BLOCKSIZE ...
-    + 2*ADXL_BLOCKSIZE+SPO2_BLOCKSIZE;
+    + 2*ADXL_BLOCKSIZE+SPO2_BLOCKSIZE+FLAG_BYTES;
 
 % Open the log file
 [fileName, pathName] = uigetfile('*.bin', 'Select Log File');
@@ -41,6 +42,7 @@ ecgData = zeros(1, ECG_BLOCKSIZE*numBlocks);
 emgData = zeros(1, EMG_BLOCKSIZE*numBlocks);
 adxlData = zeros(1, ADXL_BLOCKSIZE*numBlocks);
 spo2Data = zeros(1, SPO2_BLOCKSIZE*numBlocks);
+flagData = zeros(1, FLAG_BYTES*numBlocks);
 
 % Parse the raw data
 for n = 0:numBlocks-1
@@ -105,6 +107,12 @@ for n = 0:numBlocks-1
         spo2Data(i+SPO2_BLOCKSIZE*n) = rawData(i);
     end
     rawData = rawData(SPO2_BLOCKSIZE+1:length(rawData));
+    
+    % Parse Flag Byte
+    for i=1:FLAG_BYTES
+        flagData(n+i) = rawData(i);
+    end
+    rawData = rawData(FLAG_BYTES+1:length(rawData));
 end
 adxlData = reshape(adxlData,3,[]);
 
@@ -113,6 +121,12 @@ fs_spo2 = 10;
 t = 0:1/fs:(length(ecgData)-1)/fs;
 t_spo2 = 0:1/fs_spo2:(length(spo2Data)-1)/fs_spo2;
 t_accel = 0:1/fs:(length(adxlData)-1)/fs;
+
+for n=1:60
+    ecgData(n) = ecgData(60);
+    emgData(n) = emgData(60);
+end
+
 % Plot ECG Data
 figure('Name', 'ECG Data')
 plot(t, ecgData);
@@ -154,9 +168,9 @@ xlabel('Time (s)')
 ylabel('ft^2/s')
 saveas(gcf,[pathName,'_ADXL'],'png')
 
-% % Plot SPO2 Data
-% figure('Name', 'SPO2')
-% plot(t_spo2, spo2Data)
-% title('SPO2')
-% xlabel('Time (s)')
-% ylabel('%')
+% Plot SPO2 Data
+figure('Name', 'SPO2')
+plot(t_spo2, spo2Data)
+title('SPO2')
+xlabel('Time (s)')
+ylabel('%')

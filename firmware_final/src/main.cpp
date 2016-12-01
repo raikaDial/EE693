@@ -18,13 +18,15 @@
 #include "sleep.h"
 #include "clocks.h"
 
+#define RAWDATA_SAVE
+
 // ***** Sensor Sampling Stuff ***** //
 ADC *adc = new ADC(); // adc object
 const int ECG_PIN = A1;
 const int EMG_PIN = A2;
 
 // Timer Control
-const float scale_timer = 15.4; // Need to scale the sampling frequency to account for time spent in sleep mode. Since
+const float scale_timer = 15.8; // Need to scale the sampling frequency to account for time spent in sleep mode. Since
                                 //     the timers are based on the clock speed, and the clock speed goes from 180 MHz
                                 //     to 2 MHz for sleep mode, need to manually fine tune this value to account for this.
 const uint32_t sampling_timer_TS = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
@@ -56,6 +58,7 @@ void sampling_timer_isr(void) {
 #define ECG_BUFFSIZE 1000
 #define EMG_BUFFSIZE 1000
 #define SPO2_BUFFSIZE 40
+#define FLAG_BYTES 2
 float32_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t ecg_buff_filt[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t emg_buff[EMG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
@@ -70,17 +73,20 @@ uint16_t emg_buff_idx = 0;
 
 // ***** DSP Stuff ***** //
 // Sign on 'a' coefficients is opposite of convention. Enter with caution.
-iir_filter notch60Hz( (const float32_t[]){0.9408, -0.1181, 0.9408, 0.1181, 0.8816}, 1 ); // fs = 250 Hz
+
+// EMG Filters
 iir_filter emgLP( (const float32_t[]){0.0021, 0.0042, 0.0021, 1.8669, -0.8752}, 1 ); // fs = 250 Hz
+iir_filter emgBP( (const float32_t[]){0.4208, 0, -0.4208, 0.6096, -0.1584}, 1 ); // fs = 250 Hz Passband = 20 - 70 Hz
 
 // ECG Filters
+iir_filter notch60Hz( (const float32_t[]){0.9408, -0.1181, 0.9408, 0.1181, 0.8816}, 1 ); // fs = 250 Hz
 iir_filter ecgBP( (const float32_t[]){0.1122, 0, -0.1122, 1.7336, -0.7757}, 1 );// fs = 250 Hz, Passband = 5 - 15 Hz
 fir_filter ecgDev( (const float32_t[]){-1, -2, 0, 2, 1}, 5, NUMSAMPLES); // ECG Derivative Filter
 float32_t ecgMA_coeffs[37] = {
-    1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37,
-    1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37,
-    1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37, 1/37,
-    1/37
+    1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0,
+    1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0,
+    1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0, 1/37.0,
+    1/37.0
 };
 fir_filter ecgMA(ecgMA_coeffs, 37, NUMSAMPLES); // Moving Average Filter
 // ********** //
@@ -94,20 +100,60 @@ FILINFO fno;      /* File information object */
 UINT wr;
 char fname[128];
 TCHAR wfname[128];
+#if defined(RAWDATA_SAVE)
+    TCHAR wfname_raw[128];
+#endif
 
 TCHAR * char2tchar( char * charString, size_t nn, TCHAR * tcharString) {
     for(size_t ii = 0; ii<nn; ii++) tcharString[ii] = (TCHAR) charString[ii];
     return tcharString;
 }
 
-#define BUFFSIZE 4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE
+#define BUFFSIZE 4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE+FLAG_BYTES
 uint8_t buffer[BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 //uint8_t magic_nums[] = {'E', 'E', '6', '9', '3'};
 // ********** //
 
 // ***** ADXL345 Stuff ***** //
 const uint16_t ADXL_CS_PIN = 10;
-ADXL345 adxl = ADXL345(10);
+ADXL345 adxl = ADXL345(ADXL_CS_PIN);
+uint16_t single_trigger_counter = 0;
+uint16_t single_trigger_counter_threshold = 6;
+
+uint16_t double_trigger_counter = 0;
+
+void ADXL_ISR() {
+  // getInterruptSource clears all triggered actions after returning value
+  // Do not call again until you need to recheck for triggered actions
+  byte interrupts = adxl.getInterruptSource();
+
+  if(adxl.triggered(interrupts, ADXL345_FREE_FALL)){
+  }
+
+  if(adxl.triggered(interrupts, ADXL345_INACTIVITY)){
+  }
+
+  if(adxl.triggered(interrupts, ADXL345_ACTIVITY)){
+  }
+
+  if(adxl.triggered(interrupts, ADXL345_DOUBLE_TAP)){
+    ++double_trigger_counter;
+  }
+
+  if(adxl.triggered(interrupts, ADXL345_SINGLE_TAP)){
+    //digitalWrite(23, HIGH);
+    ++single_trigger_counter;
+    //digitalWrite(23, LOW);
+  }
+}
+
+typedef enum SingleTapThresholds {
+    SINGLE_TAP_THRESHOLD_0 = 0x00,
+	SINGLE_TAP_THRESHOLD_1 = 0x01,
+	SINGLE_TAP_THRESHOLD_2 = 0x02,
+	SINGLE_TAP_THRESHOLD_3 = 0x03,
+	SINGLE_TAP_THRESHOLD_4 = 0x04
+} SingleTapThresholds;
 // ********** //
 
 // ***** Low Power Mode Stuff ***** //
@@ -122,7 +168,7 @@ void sleep() {
 
 void setup() {
     // // Wait for serial to open. No need for Serial.begin() because Teensy has native USB
-    while (!Serial);
+    //while (!Serial);
     pinMode(23, OUTPUT);
     pinMode(22, OUTPUT);
     f_mount(&fatfs, (TCHAR*)_T("/"), 0); /* Mount/Unmount a logical drive */
@@ -139,7 +185,14 @@ void setup() {
     adxl.powerOn();
     adxl.setRangeSetting(16);
     adxl.setImportantInterruptMapping(1, 1, 1, 1, 1); // Put all interrupts on pin 1
+    adxl.setTapDetectionOnXYZ(1, 0, 0); // Detect taps in the directions turned ON "adxl.setTapDetectionOnX(X, Y, Z);" (1 == ON, 0 == OFF)
 
+    // Set values for what is considered a TAP and what is a DOUBLE TAP (0-255)
+    adxl.setTapThreshold(35);           // 62.5 mg per increment
+    adxl.setTapDuration(10);            // 625 μs per increment
+    adxl.setDoubleTapLatency(80);       // 1.25 ms per increment
+    adxl.setDoubleTapWindow(200);       // 1.25 ms per increment
+    adxl.singleTapINT(1);
 
     spo2_sensor.begin(); // Initialize Pulse Oximeter
 
@@ -149,6 +202,10 @@ void setup() {
         rc = f_open(&fil, char2tchar(fname, 128, wfname), FA_WRITE | FA_CREATE_NEW);
         if(rc == FR_OK) {
             rc = f_close(&fil);
+            #if defined(RAWDATA_SAVE)
+                sprintf(fname, "log%u_raw.bin", i);
+                rc = f_open(&fil, char2tchar(fname, 128, wfname_raw), FA_WRITE | FA_CREATE_NEW);
+            #endif
             break;
         }
     }
@@ -173,6 +230,7 @@ void loop() {
         adxl.readAccel(&adxl345_buff[adxl345_buff_idx]);
         adxl345_buff_idx +=3;
         adxl345_flag = false;
+        ADXL_ISR();
     }
     if(Wire.spo2_flag) {
         digitalWriteFast(22, HIGH);
@@ -195,7 +253,7 @@ void loop() {
                 irACValueSqSum += (float)spo2_sensor.irACValue[i]*(float)spo2_sensor.irACValue[i];
                 redACValueSqSum += (float)spo2_sensor.redACValue[i]*(float)spo2_sensor.redACValue[i];
             }
-            float acSqRatio = 100.0*log(redACValueSqSum/spo2_sensor.num_samples_var)/log(irACValueSqSum/spo2_sensor.num_samples_var);
+            float acSqRatio = 100.0*log(redACValueSqSum/((float)spo2_sensor.num_samples_var))/log(irACValueSqSum/((float)spo2_sensor.num_samples_var));
 
             // Determine index in SPO2 Lookup Table
             uint8_t index = 0;
@@ -220,12 +278,26 @@ void loop() {
         spo2_buff_idx = 0;
 
         // ***** Data filtering goes here ***** //
-        // ecgBP.filter(ecg_buff, ecg_buff_filt, NUMSAMPLES);
-        // ecgDev.filter(ecg_buff_filt, ecg_buff_filt);
-        // for(int i=0; i<NUMSAMPLES; ++i) // square the ecg signal
-        //     ecg_buff_filt[i] = ecg_buff_filt[i]*ecg_buff_filt[i];
-        //ecgMA.filter(ecg_buff_filt, ecg_buff_filt);
+        ecgBP.filter(ecg_buff, ecg_buff_filt, NUMSAMPLES);
+        ecgDev.filter(ecg_buff_filt, ecg_buff_filt);
+        for(int i=0; i<NUMSAMPLES; ++i) // square the ecg signal
+            ecg_buff_filt[i] = ecg_buff_filt[i]*ecg_buff_filt[i];
+        ecgMA.filter(ecg_buff_filt, ecg_buff_filt);
         //emgLP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
+        emgBP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
+
+        // Set motion detection flags
+        uint8_t adxl_flags = 0;
+        if(single_trigger_counter > SINGLE_TAP_THRESHOLD_4)
+            adxl_flags |= 5;
+        else if(single_trigger_counter > SINGLE_TAP_THRESHOLD_3)
+            adxl_flags |= 4;
+        else if(single_trigger_counter > SINGLE_TAP_THRESHOLD_2)
+            adxl_flags |= 3;
+        else if(single_trigger_counter > SINGLE_TAP_THRESHOLD_1)
+            adxl_flags |= 2;
+        else if(single_trigger_counter > SINGLE_TAP_THRESHOLD_0)
+            adxl_flags |= 1;
         // ********** //
 
         // ***** Any processing using data goes here ***** //
@@ -235,12 +307,27 @@ void loop() {
         rc = f_open(&fil, wfname, FA_WRITE | FA_OPEN_EXISTING);
         rc = f_lseek(&fil, f_size(&fil));
 
+        // Save filtered data
         memcpy(buffer, (uint8_t*)ecg_buff_filt, 4*ECG_BUFFSIZE);
         memcpy(buffer+4*ECG_BUFFSIZE, (uint8_t*)emg_buff_filt, 4*EMG_BUFFSIZE);
         memcpy(buffer+4*ECG_BUFFSIZE+4*EMG_BUFFSIZE, (uint8_t*)adxl345_buff, 2*ADXL345_BUFFSIZE);
         memcpy(buffer+4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+2*ADXL345_BUFFSIZE, spo2_buff, SPO2_BUFFSIZE);
+        //memcpy(buffer+4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+2*ADXL345_BUFFSIZE+SPO2_BUFFSIZE, adxl_flags, FLAG_BYTES);
+        adxl_flags = 0xAA;
+        buffer[4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+2*ADXL345_BUFFSIZE+SPO2_BUFFSIZE] = adxl_flags;
+
         rc = f_write(&fil, buffer, BUFFSIZE, &wr);
         rc = f_close(&fil);
+
+        #if defined(RAWDATA_SAVE)
+            // Save unfiltered data just for testing
+            rc = f_open(&fil, wfname_raw, FA_WRITE | FA_OPEN_EXISTING);
+            rc = f_lseek(&fil, f_size(&fil));
+            memcpy(buffer, (uint8_t*)ecg_buff, 4*ECG_BUFFSIZE);
+            memcpy(buffer+4*ECG_BUFFSIZE, (uint8_t*)emg_buff, 4*EMG_BUFFSIZE);
+            rc = f_write(&fil, buffer, BUFFSIZE, &wr);
+            rc = f_close(&fil);
+        #endif
     }
     interrupts();
     digitalWriteFast(23, LOW);
