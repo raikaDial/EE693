@@ -11,7 +11,7 @@ ECG_BLOCKSIZE = 1000;
 EMG_BLOCKSIZE = 1000;
 ADXL_BLOCKSIZE = 3*1000;
 SPO2_BLOCKSIZE = 40;
-FLAG_BYTES = 2;
+FLAG_BYTES = 0;
 BLOCKSIZE = 4*ECG_BLOCKSIZE+4*EMG_BLOCKSIZE ...
     + 2*ADXL_BLOCKSIZE+SPO2_BLOCKSIZE+FLAG_BYTES;
 
@@ -109,9 +109,9 @@ for n = 0:numBlocks-1
     rawData = rawData(SPO2_BLOCKSIZE+1:length(rawData));
     
     % Parse Flag Byte
-    for i=1:FLAG_BYTES
-        flagData(n+i) = rawData(i);
-    end
+%     for i=1:FLAG_BYTES
+%         flagData(n+i) = rawData(i);
+%     end
     rawData = rawData(FLAG_BYTES+1:length(rawData));
 end
 adxlData = reshape(adxlData,3,[]);

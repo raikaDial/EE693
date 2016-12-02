@@ -58,7 +58,7 @@ void sampling_timer_isr(void) {
 #define ECG_BUFFSIZE 1000
 #define EMG_BUFFSIZE 1000
 #define SPO2_BUFFSIZE 40
-#define FLAG_BYTES 2
+//#define FLAG_BYTES 2
 float32_t ecg_buff[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t ecg_buff_filt[ECG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 float32_t emg_buff[EMG_BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
@@ -109,7 +109,7 @@ TCHAR * char2tchar( char * charString, size_t nn, TCHAR * tcharString) {
     return tcharString;
 }
 
-#define BUFFSIZE 4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE+FLAG_BYTES
+#define BUFFSIZE 4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+SPO2_BUFFSIZE+2*ADXL345_BUFFSIZE//+FLAG_BYTES
 uint8_t buffer[BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 //uint8_t magic_nums[] = {'E', 'E', '6', '9', '3'};
 // ********** //
@@ -262,7 +262,10 @@ void loop() {
             else if (acSqRatio > 50)
                 index = (uint8_t)acSqRatio - 50;
 
-            spo2_buff[spo2_buff_idx++] = spo2_sensor.spO2LUT[index];
+            if(index >= 0 && index <= 43) // Make sure index is within LUT bounds
+                spo2_buff[spo2_buff_idx++] = spo2_sensor.spO2LUT[index];
+            else
+                spo2_buff[spo2_buff_idx++] = 0;
         }
 
         Wire.spo2_flag = false;
@@ -313,8 +316,8 @@ void loop() {
         memcpy(buffer+4*ECG_BUFFSIZE+4*EMG_BUFFSIZE, (uint8_t*)adxl345_buff, 2*ADXL345_BUFFSIZE);
         memcpy(buffer+4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+2*ADXL345_BUFFSIZE, spo2_buff, SPO2_BUFFSIZE);
         //memcpy(buffer+4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+2*ADXL345_BUFFSIZE+SPO2_BUFFSIZE, adxl_flags, FLAG_BYTES);
-        adxl_flags = 0xAA;
-        buffer[4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+2*ADXL345_BUFFSIZE+SPO2_BUFFSIZE] = adxl_flags;
+        // adxl_flags = 0xAA;
+        // buffer[4*ECG_BUFFSIZE+4*EMG_BUFFSIZE+2*ADXL345_BUFFSIZE+SPO2_BUFFSIZE] = adxl_flags;
 
         rc = f_write(&fil, buffer, BUFFSIZE, &wr);
         rc = f_close(&fil);
