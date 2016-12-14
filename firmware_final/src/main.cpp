@@ -26,7 +26,7 @@ const int ECG_PIN = A1;
 const int EMG_PIN = A7;
 
 // Timer Control
-const float scale_timer = 15.3; // Need to scale the sampling frequency to account for time spent in sleep mode. Since
+const float scale_timer = 15.0; // Need to scale the sampling frequency to account for time spent in sleep mode. Since
                                 //     the timers are based on the clock speed, and the clock speed goes from 180 MHz
                                 //     to 2 MHz for sleep mode, need to manually fine tune this value to account for this.
 const uint32_t sampling_timer_TS = (uint32_t)(1000000/250.0/scale_timer); // Sampling Period in Microseconds
@@ -71,6 +71,7 @@ uint16_t adxl345_buff_idx = 0;
 uint16_t spo2_buff_idx = 0;
 uint16_t emg_buff_idx = 0;
 uint16_t flag_buff_idx = 0;
+uint8_t single_trigger_counter=0;
 // ********** //
 
 // ***** DSP Stuff ***** //
@@ -118,43 +119,23 @@ uint8_t buffer[BUFFSIZE] __attribute__( ( aligned ( 16 ) ) );
 // ***** ADXL345 Stuff ***** //
 const uint16_t ADXL_CS_PIN = 10;
 ADXL345 adxl = ADXL345(ADXL_CS_PIN);
-uint16_t single_trigger_counter = 0;
-uint16_t single_trigger_counter_threshold = 6;
-
-uint16_t double_trigger_counter = 0;
 
 void ADXL_ISR() {
   // getInterruptSource clears all triggered actions after returning value
   // Do not call again until you need to recheck for triggered actions
   byte interrupts = adxl.getInterruptSource();
 
-  if(adxl.triggered(interrupts, ADXL345_FREE_FALL)){
-  }
-
-  if(adxl.triggered(interrupts, ADXL345_INACTIVITY)){
-  }
-
-  if(adxl.triggered(interrupts, ADXL345_ACTIVITY)){
-  }
-
-  if(adxl.triggered(interrupts, ADXL345_DOUBLE_TAP)){
-    ++double_trigger_counter;
-  }
-
   if(adxl.triggered(interrupts, ADXL345_SINGLE_TAP)){
-    flag_buff[flag_buff_idx] = 0;
+    //digitalWrite(23, HIGH);
+    ++single_trigger_counter;
+    flag_buff[flag_buff_idx]=single_trigger_counter;
+    //digitalWrite(23, LOW);
   }
+  else if (single_trigger_counter>0){
+  --single_trigger_counter;
+  flag_buff[flag_buff_idx]=single_trigger_counter;
 }
-
-typedef enum SingleTapThresholds {
-    SINGLE_TAP_THRESHOLD_0 = 0x00,
-	SINGLE_TAP_THRESHOLD_1 = 0x01,
-	SINGLE_TAP_THRESHOLD_2 = 0x02,
-	SINGLE_TAP_THRESHOLD_3 = 0x03,
-	SINGLE_TAP_THRESHOLD_4 = 0x04
-} SingleTapThresholds;
-// ********** //
-
+}
 // ***** Low Power Mode Stuff ***** //
 void sleep() {
     pee_blpi( );
@@ -179,12 +160,13 @@ void setup() {
     adxl.setSpiBit(0); // Use 4-wire SPI
     adxl.powerOn();
     adxl.setRangeSetting(16);
+    adxl.setFullResBit(true);
     adxl.setImportantInterruptMapping(1, 1, 1, 1, 1); // Put all interrupts on pin 1
     adxl.setTapDetectionOnXYZ(1, 0, 0); // Detect taps in the directions turned ON "adxl.setTapDetectionOnX(X, Y, Z);" (1 == ON, 0 == OFF)
 
     // Set values for what is considered a TAP and what is a DOUBLE TAP (0-255)
-    adxl.setTapThreshold(35);           // 62.5 mg per increment
-    adxl.setTapDuration(10);            // 625 μs per increment
+    adxl.setTapThreshold(31);           // 62.5 mg per increment
+    adxl.setTapDuration(240);            // 625 μs per increment
     adxl.setDoubleTapLatency(80);       // 1.25 ms per increment
     adxl.setDoubleTapWindow(200);       // 1.25 ms per increment
     adxl.singleTapINT(1);
@@ -193,7 +175,7 @@ void setup() {
 
     // Initialize Logger File
     for(size_t i=0; ;++i) {
-        sprintf(fname, "log%u.bin", i);
+        sprintf(fname, "log%u_filt.bin", i);
         rc = f_open(&fil, char2tchar(fname, 128, wfname), FA_WRITE | FA_CREATE_NEW);
         if(rc == FR_OK) {
             rc = f_close(&fil);
@@ -211,7 +193,7 @@ void setup() {
 
 void loop() {
     sleep();
-    digitalWriteFast(23, HIGH);
+    //digitalWriteFast(23, HIGH);
     noInterrupts();
     if(ecg_flag) {
         ecg_buff[ecg_buff_idx++] = (float32_t)(adc->adc0->analogRead(ECG_PIN));
@@ -282,12 +264,10 @@ void loop() {
         for(int i=0; i<NUMSAMPLES; ++i) // square the ecg signal
             ecg_buff_filt[i] = ecg_buff_filt[i]*ecg_buff_filt[i];
         ecgMA.filter(ecg_buff_filt, ecg_buff_filt);
-        //emgLP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
-        emgBP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
+        emgLP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
+      //  emgBP.filter(emg_buff, emg_buff_filt, NUMSAMPLES);
 
         // ***** Any processing using data goes here ***** //
-
-        // ********** //
 
         rc = f_open(&fil, wfname, FA_WRITE | FA_OPEN_EXISTING);
         rc = f_lseek(&fil, f_size(&fil));
